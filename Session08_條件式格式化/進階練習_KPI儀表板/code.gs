@@ -170,5 +170,66 @@ function onOpen() {
     .createMenu("🤖 KPI 儀表板")
     .addItem("📦 初始化 KPI 資料", "初始化KPI資料")
     .addItem("📊 建立 KPI 儀表板", "建立KPI儀表板")
+    .addSeparator()
+    .addItem("📧 轉存PDF並寄出信件", "convertSheetToPDFAndEmail")
     .addToUi();
+}
+
+/**
+ * 📧 將當前工作表轉存為 PDF 並以電子郵件發送
+ */
+function convertSheetToPDFAndEmail() {
+  var ui = SpreadsheetApp.getUi();
+  
+  // 提示輸入收件人電子郵件地址
+  var response = ui.prompt('📧 傳送 PDF 報表', '請輸入收件人的電子郵件地址：', ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  var email = response.getResponseText().trim();
+
+  // 驗證電子郵件格式
+  if (!email || !validateEmail(email)) {
+    ui.alert('❌ 錯誤', '電子郵件地址格式不正確，請重新輸入。', ui.ButtonSet.OK);
+    return;
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getActiveSheet();
+    
+    // 使用 toast 顯示處理中訊息，避免彈出視窗卡住問題
+    ss.toast("正在轉換 PDF 並準備發送，這可能需要幾秒鐘...", "⏳ 系統處理中", 10);
+
+    // 獲取試算表檔案並轉換成 PDF blob
+    var file = DriveApp.getFileById(ss.getId());
+    var pdf = file.getAs('application/pdf');
+    
+    // 設定 PDF 檔名
+    var formattedDate = Utilities.formatDate(new Date(), "Asia/Taipei", "yyyyMMdd");
+    pdf.setName(sheet.getName() + "_" + formattedDate + ".pdf");
+
+    // 發送電子郵件
+    var subject = '📊 報表傳送：' + sheet.getName() + ' (' + formattedDate + ')';
+    var body = '您好：\n\n附件為試算表工作表「' + sheet.getName() + '」的 PDF 匯出檔，請查收。\n\n本信件由系統自動處理。';
+    
+    MailApp.sendEmail(email, subject, body, {
+      attachments: [pdf]
+    });
+
+    ui.alert('✅ 傳送成功', 'PDF 報表已順利寄送至：' + email, ui.ButtonSet.OK);
+  } catch (錯誤) {
+    Logger.log('❌ 發送 PDF 失敗：' + 錯誤.message);
+    ui.alert('❌ 傳送失敗', '發送失敗，原因：\n' + 錯誤.message + '\n\n提示：若您是首次執行此功能，請在彈出的安全性視窗中點擊「進階」並同意授權。', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * 電子郵件格式正則表達式驗證
+ */
+function validateEmail(email) {
+  var re = /^(([^<>()\[\]\\.,;:\s@\"]+(\.[^<>()\[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+  return re.test(String(email).toLowerCase());
 }

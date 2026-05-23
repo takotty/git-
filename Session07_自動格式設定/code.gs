@@ -338,6 +338,310 @@ function 一鍵美化() {
   }
 }
 
+/**
+ * 🏛️ 一鍵美化財務報表 (Financial Report Beautifier)
+ * 說明：自動偵測工作表中的資料結構，套用頂級會計/財務專屬排版，
+ *       包含自動對齊、千分位格式化、智慧合計列樣式（上單線、底雙線）與專業配色。
+ */
+function 一鍵美化財報表格() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getActiveSheet();
+    var range = sheet.getDataRange();
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+
+    if (lastRow < 2 || lastCol < 1) {
+      SpreadsheetApp.getUi().alert("⚠️ 工作表中沒有足夠的資料可以美化！");
+      return;
+    }
+
+    // 讓使用者選擇配色主題
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      "🏛️ 財務報表美化工具",
+      "即將為當前工作表套用專業財報格式。\n是否使用「經典深藍」配色主題？（若選擇否，將使用「高雅墨綠」）",
+      ui.ButtonSet.YES_NO_CANCEL
+    );
+
+    if (response === ui.Button.CANCEL || response === ui.Button.CLOSE) return;
+
+    // 配色定義
+    var primaryColor, accentColor, headerTextColor, zebraColor, totalBgColor, borderColor;
+    if (response === ui.Button.YES) {
+      // 經典深藍 (Classic Corporate Navy)
+      primaryColor = "#1B365D";     // 深海軍藍
+      accentColor = "#2C3E50";      // 板岩灰藍
+      headerTextColor = "#FFFFFF";  // 白色
+      zebraColor = "#F8F9FA";       // 極淺灰
+      totalBgColor = "#EAECEE";     // 會計合計列淺灰
+      borderColor = "#BDC3C7";      // 淺框線
+    } else {
+      // 高雅墨綠 (Elegant Forest Green)
+      primaryColor = "#1E4620";     // 森林深綠
+      accentColor = "#2E5B32";      // 橄欖綠
+      headerTextColor = "#FFFFFF";  // 白色
+      zebraColor = "#F4F8F4";       // 極淺綠
+      totalBgColor = "#E8EFE9";     // 會計合計列淺綠
+      borderColor = "#C2CCD0";      // 淺框線
+    }
+
+    // 1. 全域字型與基本設定
+    range.setFontFamily("微軟正黑體");
+    range.setFontSize(10);
+    range.setFontColor("#2C3E50"); // 專業暗灰，非純黑
+    sheet.setHiddenGridlines(false); // 確保格線可見 (修正 API 名稱)
+
+    // 2. 判斷是否有合併的總標題 (例如第1列是整行合併的標題)
+    var startRow = 1;
+    var firstRange = sheet.getRange(1, 1, 1, lastCol);
+    var isMerged = false;
+    for (var c = 1; c <= lastCol; c++) {
+      if (sheet.getRange(1, c).isPartOfMerge()) {
+        isMerged = true;
+        break;
+      }
+    }
+
+    if (isMerged || (lastRow > 3 && sheet.getRange(1, 1).getValue().toString().match(/(報表|損益|資產|平衡|科目|年|度)/))) {
+      // 格式化主標題 (第1列)
+      var titleRange = sheet.getRange(1, 1, 1, lastCol);
+      titleRange.setFontSize(16)
+                .setFontWeight("bold")
+                .setFontColor(primaryColor)
+                .setHorizontalAlignment("center")
+                .setVerticalAlignment("middle");
+      sheet.setRowHeight(1, 45);
+      
+      // 如果第2列是副標題 (例如日期、單位)
+      var secondRowText = sheet.getRange(2, 1).getValue().toString();
+      if (secondRowText.match(/(單位|日期|幣值|元|Date|Unit)/i) || sheet.getRange(2, 1).isPartOfMerge()) {
+        var subtitleRange = sheet.getRange(2, 1, 1, lastCol);
+        subtitleRange.setFontSize(9)
+                     .setFontColor("#7F8C8D")
+                     .setHorizontalAlignment("center");
+        sheet.setRowHeight(2, 25);
+        startRow = 3; // 標題列從第3列開始
+      } else {
+        startRow = 2; // 標題列從第2列開始
+      }
+    }
+
+    // 3. 標題列格式化
+    var headerRow = startRow;
+    var headerRange = sheet.getRange(headerRow, 1, 1, lastCol);
+    headerRange.setBackground(primaryColor)
+               .setFontColor(headerTextColor)
+               .setFontWeight("bold")
+               .setFontSize(11)
+               .setHorizontalAlignment("center")
+               .setVerticalAlignment("middle");
+    sheet.setRowHeight(headerRow, 32);
+
+    // 4. 資料列格式化
+    var dataStartRow = headerRow + 1;
+    var dataRowCount = lastRow - dataStartRow + 1;
+    
+    if (dataRowCount > 0) {
+      // 清除資料範圍的原有背景與框線，避免格式殘留
+      var dataRange = sheet.getRange(dataStartRow, 1, dataRowCount, lastCol);
+      dataRange.setBackground("#FFFFFF");
+      dataRange.setBorder(false, false, false, false, false, false);
+      
+      // 斑馬紋與框線設定
+      for (var r = dataStartRow; r <= lastRow; r++) {
+        var rowRange = sheet.getRange(r, 1, 1, lastCol);
+        sheet.setRowHeight(r, 26); // 給予會計表格呼吸空間
+        
+        // 預設斑馬紋
+        if ((r - dataStartRow) % 2 === 1) {
+          rowRange.setBackground(zebraColor);
+        }
+        
+        // 加上淺灰色水平細框線
+        rowRange.setBorder(null, null, true, null, null, null, borderColor, SpreadsheetApp.BorderStyle.SOLID);
+      }
+
+      // 5. 智慧資料對齊與數字格式化
+      // 遍歷每一欄來判斷類型
+      for (var c = 1; c <= lastCol; c++) {
+        var colValues = sheet.getRange(dataStartRow, c, dataRowCount, 1).getValues();
+        var numCount = 0;
+        var hasPercent = false;
+        var textCount = 0;
+
+        for (var i = 0; i < colValues.length; i++) {
+          var val = colValues[i][0];
+          if (val === "" || val === null) continue;
+          
+          if (typeof val === "number") {
+            numCount++;
+          } else {
+            textCount++;
+            if (val.toString().includes("%")) {
+              hasPercent = true;
+            }
+          }
+        }
+
+        var colRange = sheet.getRange(dataStartRow, c, dataRowCount, 1);
+        
+        // 判斷此欄是否為數值欄
+        if (numCount > textCount) {
+          // 右對齊
+          colRange.setHorizontalAlignment("right");
+          // 套用專業會計數字格式：千分位、負數用括號表示、零值顯示短橫線
+          if (hasPercent) {
+            colRange.setNumberFormat("0.00%");
+          } else {
+            colRange.setNumberFormat("#,##0;(#,##0);\"-\"");
+          }
+        } else {
+          // 否則為文字欄，左對齊
+          colRange.setHorizontalAlignment("left");
+        }
+      }
+
+      // 6. 智慧合計列偵測 (會計專屬：上單線、底下雙線、粗體)
+      for (var r = dataStartRow; r <= lastRow; r++) {
+        var firstCellVal = sheet.getRange(r, 1).getValue().toString();
+        var rowIsTotal = false;
+
+        // 檢查該列是否包含合計/總計關鍵字
+        if (firstCellVal.match(/(合計|總計|合計數|小計|Total|Subtotal|Net Income|營業利益|淨利|資產總額|負債總額|權益總額)/i)) {
+          rowIsTotal = true;
+        } else {
+          // 若第一欄沒有，檢查整列是否有 "合計" 字眼
+          var rowValues = sheet.getRange(r, 1, 1, lastCol).getValues()[0];
+          for (var c = 0; c < rowValues.length; c++) {
+            if (rowValues[c].toString().match(/(合計|總計|Total|Subtotal)/)) {
+              rowIsTotal = true;
+              break;
+            }
+          }
+        }
+
+        if (rowIsTotal) {
+          var totalRowRange = sheet.getRange(r, 1, 1, lastCol);
+          totalRowRange.setFontWeight("bold")
+                       .setBackground(totalBgColor);
+          
+          // 會計標準框線：上邊框為單線 (SOLID)
+          totalRowRange.setBorder(
+            true,  // top
+            null,  // left
+            null,  // bottom
+            null,  // right
+            null,  // vertical
+            null,  // horizontal
+            primaryColor,
+            SpreadsheetApp.BorderStyle.SOLID // top border style
+          );
+          
+          // 下邊框單獨設定為 DOUBLE 雙線
+          totalRowRange.setBorder(
+            null, null, true, null, null, null,
+            primaryColor,
+            SpreadsheetApp.BorderStyle.DOUBLE
+          );
+        }
+      }
+    }
+
+    // 7. 外圍大框線與自動欄寬
+    var fullTableRange = sheet.getRange(headerRow, 1, lastRow - headerRow + 1, lastCol);
+    fullTableRange.setBorder(
+      true, true, true, true, null, null,
+      primaryColor,
+      SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+    );
+
+    // 自動調整欄寬，並加上最小與最大寬度限制
+    for (var c = 1; c <= lastCol; c++) {
+      sheet.autoResizeColumn(c);
+      var width = sheet.getColumnWidth(c);
+      if (width < 110) {
+        sheet.setColumnWidth(c, 110);
+      } else if (width > 300) {
+        sheet.setColumnWidth(c, 300);
+      }
+    }
+
+    // 凍結標題列
+    sheet.setFrozenRows(headerRow);
+
+    ui.alert("🏛️ 財務報表美化完成！\n\n已套用特製格式：\n1. 配色主題：" + (response === ui.Button.YES ? "經典深藍" : "高雅墨綠") + "\n2. 智慧對齊與千分位格式化\n3. 會計合計列（上單線、下雙底線）\n4. 格線強化與自動欄寬。");
+
+  } catch (錯誤) {
+    Logger.log("❌ 錯誤：" + 錯誤.message);
+    SpreadsheetApp.getUi().alert("❌ 錯誤：" + 錯誤.message);
+  }
+}
+
+// ============================================================
+// 第五部分：財務報表與自動化工具
+// ============================================================
+
+/**
+ * 📧 將當前工作表轉存為 PDF 並以電子郵件發送
+ */
+function convertSheetToPDFAndEmail() {
+  var ui = SpreadsheetApp.getUi();
+  
+  // 提示輸入收件人電子郵件地址
+  var response = ui.prompt('📧 傳送 PDF 報表', '請輸入收件人的電子郵件地址：', ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+  
+  var email = response.getResponseText().trim();
+
+  // 驗證電子郵件格式
+  if (!email || !validateEmail(email)) {
+    ui.alert('❌ 錯誤', '電子郵件地址格式不正確，請重新輸入。', ui.ButtonSet.OK);
+    return;
+  }
+
+  try {
+    // 取得當前的試算表
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = spreadsheet.getActiveSheet();
+    
+    // 使用 toast 顯示處理中訊息，避免彈出視窗卡住
+    spreadsheet.toast("正在將「" + sheet.getName() + "」轉換為 PDF 並發送郵件，請稍候...", "⏳ 處理中", 10);
+
+    // 獲取試算表檔案並轉換成 PDF
+    var file = DriveApp.getFileById(spreadsheet.getId());
+    var pdf = file.getAs('application/pdf');
+    
+    // 設定 PDF 檔案名稱
+    var formattedDate = Utilities.formatDate(new Date(), "Asia/Taipei", "yyyyMMdd");
+    pdf.setName(sheet.getName() + "_" + formattedDate + ".pdf");
+
+    // 發送電子郵件
+    var subject = '📊 財務報表傳送：' + sheet.getName() + ' (' + formattedDate + ')';
+    var body = '您好：\n\n附件為您要求的 Google 試算表工作表「' + sheet.getName() + '」之 PDF 匯出檔，請查收。\n\n本信件由 Google Apps Script 自動排程系統發送。';
+    
+    MailApp.sendEmail(email, subject, body, {
+      attachments: [pdf]
+    });
+
+    ui.alert('✅ 傳送成功', 'PDF 報表已順利寄送至：' + email, ui.ButtonSet.OK);
+  } catch (錯誤) {
+    Logger.log('❌ 發送 PDF 失敗：' + 錯誤.message);
+    ui.alert('❌ 傳送失敗', '發送失敗，錯誤說明：\n' + 錯誤.message + '\n\n提示：在 Google Sheets 中，DriveApp 或 MailApp 首度執行時，需要同意存取授權才可使用。', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * 電子郵件格式驗證
+ */
+function validateEmail(email) {
+  var re = /^(([^<>()\[\]\\.,;:\s@\"]+(\.[^<>()\[\]\\.,;:\s@\"]+)*)|(\".+\"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+  return re.test(String(email).toLowerCase());
+}
+
 // ============================================================
 // 初始化範例資料
 // ============================================================
@@ -368,6 +672,9 @@ function onOpen() {
     .addItem("🎨 背景框線設定", "背景框線設定")
     .addSeparator()
     .addItem("📊 自動生成格式表格", "自動生成格式表格")
-    .addItem("✨ 一鍵美化當前表", "一鍵美化")
+    .addItem("✨ 一鍵美化普通表", "一鍵美化")
+    .addItem("🏛️ 一鍵美化財報表", "一鍵美化財報表格")
+    .addSeparator()
+    .addItem("📧 轉存PDF並寄出信件", "convertSheetToPDFAndEmail")
     .addToUi();
 }
